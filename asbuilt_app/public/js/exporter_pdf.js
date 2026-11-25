@@ -739,7 +739,7 @@
   }
 
   /**
-   * Abre una ventana interactiva de visualización instantánea del plano DXF en PDF/SVG
+   * Abre una ventana interactiva / modal en página de visualización instantánea del plano DXF en PDF/SVG
    */
   function openDxfPdfVisualizer(project) {
     const G = global.ASBuiltGeometry;
@@ -747,85 +747,39 @@
     const safeName = String(project.name || 'Levantamiento').replace(/[^a-zA-Z0-9_\-]+/g, '_');
     const svgHtml = generateDxfLayoutSvgHtml(project, auditInfo);
 
-    let win = null;
-    try {
-      win = window.open('', '_blank');
-    } catch (_) {}
+    renderDxfModalInPage(project, svgHtml);
+  }
 
-    const viewerHtml = `<!DOCTYPE html>
-      <html lang="es">
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Plano DXF con Cotas (Visualización Instantánea) — ${project.name}</title>
-        <style>
-          * { box-sizing: border-box; margin: 0; padding: 0; }
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #0f172a; color: #f8fafc; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-          .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: #1e293b; border-bottom: 2px solid #334155; flex-shrink: 0; }
-          .toolbar-title { font-size: 15px; font-weight: 800; display: flex; align-items: center; gap: 8px; }
-          .badge { background: #047857; color: #fff; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
-          .btn-group { display: flex; gap: 8px; }
-          .btn { background: #3b82f6; color: #fff; border: none; border-radius: 6px; padding: 8px 14px; font-weight: 700; font-size: 13px; cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
-          .btn:hover { background: #2563eb; }
-          .btn-success { background: #10b981; }
-          .btn-success:hover { background: #059669; }
-          .btn-outline { background: transparent; border: 1.5px solid #64748b; color: #f8fafc; }
-          .btn-outline:hover { background: #334155; }
-          .viewport { flex: 1; overflow: auto; padding: 20px; display: flex; justify-content: center; align-items: flex-start; background: #090d16; }
-          .sheet-container { background: #ffffff; box-shadow: 0 10px 30px rgba(0,0,0,0.5); border-radius: 4px; max-width: 98%; width: 100%; margin: auto; }
-          @media print {
-            .toolbar { display: none !important; }
-            .viewport { padding: 0; background: #fff; }
-            .sheet-container { box-shadow: none; max-width: 100%; width: 100%; }
-            body { background: #fff; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="toolbar no-print">
-          <div class="toolbar-title">
-            <span>📐 Plano AS-BUILT 2D (Versión DXF con Cotas en mm)</span>
-            <span class="badge">Rhino 8 Compatible</span>
-            <span style="font-size:12px; color:#94a3b8;">${escapeHtml(project.name)}</span>
+  function renderDxfModalInPage(project, svgHtml) {
+    let overlay = document.getElementById('asbuiltPrintModalOverlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'asbuiltPrintModalOverlay';
+      document.body.appendChild(overlay);
+    }
+    const safeName = escapeHtml(project.name || 'Levantamiento');
+    overlay.innerHTML = `
+      <div class="print-overlay-backdrop">
+        <div class="print-overlay-toolbar no-print">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <strong style="font-size:15px;">📐 Plano AS-BUILT 2D (Versión DXF con Cotas en mm)</strong>
+            <span class="badge" style="background:#047857; color:#fff; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:bold;">Rhino 8 Compatible</span>
+            <span style="font-size:12px; color:#94a3b8;">${safeName}</span>
           </div>
-          <div class="btn-group">
-            <button class="btn btn-success" onclick="downloadDxfPdf()">💾 Descargar PDF de este Plano</button>
-            <button class="btn btn-outline" onclick="window.print()">🖨 Imprimir / Guardar en PDF</button>
-            <button class="btn btn-outline" onclick="window.close()">✖ Cerrar</button>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-success" onclick="ASBuiltPdfExporter.triggerDxfPdfDownload()">💾 Descargar PDF de este Plano</button>
+            <button class="btn btn-primary" onclick="window.print()">🖨 Imprimir / Guardar en PDF</button>
+            <button class="btn" style="background:#475569; color:#fff;" onclick="document.getElementById('asbuiltPrintModalOverlay').style.display='none'">✖ Cerrar</button>
           </div>
         </div>
-        <div class="viewport">
-          <div class="sheet-container" id="sheetContainer">
+        <div class="print-overlay-content" style="background:#090d16; padding:20px; overflow:auto;">
+          <div style="background:#ffffff; border-radius:4px; box-shadow:0 8px 30px rgba(0,0,0,0.5); max-width:98%; width:100%; margin:auto; overflow:auto;">
             ${svgHtml}
           </div>
         </div>
-        <script>
-          function downloadDxfPdf() {
-            if (window.opener && window.opener.ASBuiltPdfExporter) {
-              window.opener.ASBuiltPdfExporter.triggerDxfPdfDownload();
-            } else {
-              window.print();
-            }
-          }
-        <\/script>
-      </body>
-      </html>`;
-
-    if (win) {
-      win.document.open();
-      win.document.write(viewerHtml);
-      win.document.close();
-    } else {
-      renderPrintModalInPage(project, [
-        `<div style="background:#fff; padding:10px; border-radius:8px;">
-          <div style="margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
-            <h3>Plano AS-BUILT 2D (Versión DXF con Cotas)</h3>
-            <button class="btn btn-success" onclick="ASBuiltPdfExporter.triggerDxfPdfDownload()">💾 Descargar PDF</button>
-          </div>
-          ${svgHtml}
-        </div>`
-      ]);
-    }
+      </div>
+    `;
+    overlay.style.display = 'block';
   }
 
   function escapeHtml(str) {
