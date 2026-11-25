@@ -659,6 +659,28 @@ async def api_export_pdf(request: Request) -> Response:
     return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
+@app.post("/api/export/dxf-pdf")
+async def api_export_dxf_pdf(request: Request) -> Response:
+    body = await request.json()
+    project = body.get("project", body)
+    confirm_preliminary = bool(body.get("confirmPreliminary", True))
+    try:
+        pdf_bytes, summary = export_project_to_pdf_bytes(project, confirm_preliminary=confirm_preliminary)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    fname = f"{_safe_filename(project.get('name', 'Levantamiento'))}_DXF_CON_COTAS.pdf"
+    out_file = EXPORTS_DIR / fname
+    out_file.write_bytes(pdf_bytes)
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{fname}"',
+        "X-ASBUILT-PDF-Pages": str(summary["pagesCount"]),
+        "X-ASBUILT-Export-Path": str(out_file),
+    }
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
 # Montar archivos estáticos de la PWA al final para no interceptar /api/*
 app.mount("/", StaticFiles(directory=str(PUBLIC_DIR), html=True), name="public")
 

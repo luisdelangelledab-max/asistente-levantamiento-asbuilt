@@ -362,9 +362,51 @@
           <div style="font-weight:800; font-size:13px;">${escapeHtml(p.name)}</div>
           <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(p.client || 'Sin cliente')} · ${p.conceptsCount || 0} conceptos</div>
         </div>
-        <button class="btn btn-sm" onclick="App.openSavedProject('${escapeHtml(p.id)}')">Abrir</button>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <button class="btn btn-sm" onclick="App.openSavedProject('${escapeHtml(p.id)}')">Abrir</button>
+          <button class="btn btn-sm" style="color:#dc2626; border-color:#fca5a5; background:#fff; padding:4px 8px;" onclick="App.deleteSavedProject('${escapeHtml(p.id)}', '${escapeHtml(p.name)}')" title="Eliminar proyecto guardado">🗑️</button>
+        </div>
       </div>
     `).join('');
+  }
+
+  async function deleteSavedProject(projectId, projectName) {
+    const name = projectName || 'este proyecto';
+    if (!confirm(`¿Deseas eliminar permanentemente el proyecto "${name}"?\nEsta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    try {
+      await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
+    } catch (_) {}
+
+    try {
+      localStorage.removeItem(`codex_proj_${projectId}`);
+      let list = [];
+      try {
+        list = JSON.parse(localStorage.getItem(LOCAL_LIST_KEY) || '[]');
+      } catch (_) {}
+      list = list.filter((p) => p.id !== projectId);
+      localStorage.setItem(LOCAL_LIST_KEY, JSON.stringify(list));
+    } catch (_) {}
+
+    if (state.project && state.project.id === projectId) {
+      let remaining = [];
+      try {
+        remaining = JSON.parse(localStorage.getItem(LOCAL_LIST_KEY) || '[]');
+      } catch (_) {}
+      if (remaining.length > 0) {
+        await openSavedProject(remaining[0].id);
+      } else {
+        loadProjectIntoState(buildDefaultReferenceProjectClient(), true);
+        saveCurrentProject(false);
+        renderAll();
+      }
+    }
+
+    showToastNotification('Proyecto eliminado correctamente');
+    await refreshRecentProjects();
+    renderProjectDashboard();
   }
 
   async function openSavedProject(projectId) {
@@ -4731,6 +4773,7 @@
     saveCurrentProject,
     refreshRecentProjects,
     openSavedProject,
+    deleteSavedProject,
     updateProjectMeta,
     onConceptTypeChange,
     addConcept,
@@ -4802,6 +4845,7 @@
     closeExportModal,
     triggerExportDxf,
     triggerExportPdf,
+    openDxfPdfVisualizer: () => global.ASBuiltPdfExporter && global.ASBuiltPdfExporter.openDxfPdfVisualizer(state.project),
     navigateBack,
     zoomElevation,
     navigationHistory,

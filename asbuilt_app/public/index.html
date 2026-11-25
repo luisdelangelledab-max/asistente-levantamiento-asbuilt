@@ -597,8 +597,11 @@
         <button class="btn btn-success" onclick="App.downloadBackupJson()" title="Descargar archivo transferible .asbuilt.json">
           📤 Exportar Archivo JSON Transferible (.asbuilt.json)
         </button>
-        <button class="btn btn-primary" onclick="App.triggerExportPdf()">
-          📄 Exportar PDF Vectorial
+        <button class="btn btn-outline" style="border:1.5px solid var(--primary); color:var(--primary); font-weight:700;" onclick="App.openDxfPdfVisualizer()" title="Visualizar la lámina completa del DXF con cotas en PDF al instante">
+          📐 Visualizar Plano DXF con Cotas
+        </button>
+        <button class="btn btn-primary" onclick="App.triggerExportPdf()" title="Exporta el expediente PDF y la lámina gráfica del DXF en PDF con todas las cotas">
+          📄 Exportar PDF (+ Versión DXF con Cotas)
         </button>
         <button class="btn btn-primary" onclick="App.triggerExportDxf()">
           📐 Exportar DXF 2D (Rhino 8 en mm)

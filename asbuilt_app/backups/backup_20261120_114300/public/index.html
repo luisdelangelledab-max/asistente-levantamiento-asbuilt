@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Asistente de Levantamiento AsBuilt</title>
+  <script>
+    const APP_VERSION = '2.4.0';
+    if (localStorage.getItem('asbuilt_app_version') !== APP_VERSION) {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(regs) {
+          for (var i = 0; i < regs.length; i++) regs[i].unregister();
+        }).catch(function() {});
+      }
+      if (typeof caches !== 'undefined') {
+        caches.keys().then(function(keys) {
+          for (var i = 0; i < keys.length; i++) caches.delete(keys[i]);
+        }).catch(function() {});
+      }
+      localStorage.setItem('asbuilt_app_version', APP_VERSION);
+    }
+  </script>
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="stylesheet" href="./styles.css?v=2.4.0" />
+</head>
+<body>
+  <!-- BARRA SUPERIOR DE JERARQUÍA: PROYECTO -> CONCEPTOS -> PLANTA -> ELEVACIONES -> EXPORTACIONES -->
+  <header class="topbar">
+    <div class="brand-block">
+      <button id="globalBackBtn" class="btn btn-back" onclick="App.navigateBack()" title="Regresar a la pantalla anterior" aria-label="Regresar a la pantalla anterior" style="display:none;" disabled>
+        <span class="back-arrow">◀</span>
+        <span class="back-text">Atrás</span>
+      </button>
+      <span class="brand-badge">AS-BUILT 2D</span>
+      <div>
+        <div class="brand-title" id="topProjectTitle">Asistente de Levantamiento AsBuilt</div>
+        <div class="brand-sub">Unidades reales y exportación: Milímetros (mm) · Rhino 8 Ready</div>
+      </div>
+    </div>
+
+    <nav class="breadcrumb-nav" aria-label="Flujo principal">
+      <button class="nav-step active" id="navBtnProject" onclick="App.switchMainView('PROJECT')">
+        1. Proyecto y Conceptos
+      </button>
+      <span class="nav-arrow">→</span>
+      <button class="nav-step" id="navBtnPlan" onclick="App.switchMainView('PLAN')">
+        2. Boceto en Planta
+      </button>
+      <span class="nav-arrow">→</span>
+      <button class="nav-step" id="navBtnElevation" onclick="App.switchMainView('ELEVATION')">
+        3. Elevaciones
+      </button>
+      <span class="nav-arrow">→</span>
+      <button class="nav-step" id="navBtnDoor" onclick="App.switchMainView('DOOR')">
+        4. Puertas (9 Medidas)
+      </button>
+      <span class="nav-arrow">→</span>
+      <button class="nav-step" id="navBtnExport" onclick="App.openExportModal()">
+        5. Exportaciones (PDF / DXF)
+      </button>
+    </nav>
+
+    <div class="topbar-actions">
+      <span class="status-pill" id="saveStatusPill" title="Almacenado localmente en este dispositivo">Guardado en este equipo OK</span>
+      <button class="btn btn-sm" onclick="App.toggleTouchNumpad()" title="Abrir teclado numérico táctil">
+        🔢 Teclado Táctil
+      </button>
+      <button class="btn btn-primary btn-sm" onclick="App.saveCurrentProject(true)">
+        💾 Guardar Local
+      </button>
+    </div>
+  </header>
+
+  <main class="main-workspace">
+    <!-- ====================================================================
+         VISTA 1: PROYECTO Y CONCEPTOS
+         ==================================================================== -->
+    <section class="view-panel active" id="viewProject">
+      <div class="dashboard-layout">
+        <!-- Columna izquierda: Datos del proyecto y archivos recientes -->
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Acciones de Proyecto</h2>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px;">
+              <button class="btn btn-primary" onclick="App.createNewProjectPrompt()">
+                ➕ Nuevo Proyecto
+              </button>
+              <button class="btn" onclick="document.getElementById('fileImportInput').click()" title="Cargar archivo .json transferido desde iPad u otra PC">
+                📂 Abrir Proyecto (.json)
+              </button>
+              <input type="file" id="fileImportInput" accept=".json,.asbuilt.json" style="display:none" onchange="App.importProjectFile(event)" />
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+              <button class="btn btn-success" onclick="App.downloadBackupJson()" title="Descargar archivo transferible para iPad u otra computadora">
+                📤 Exportar JSON (PC ⇄ iPad)
+              </button>
+              <button class="btn btn-warning" onclick="App.loadDemoReferenceProject()">
+                🧪 Caso Referencia
+              </button>
+            </div>
+            <div style="font-size:11.5px; color:var(--text-muted); margin-top:8px; line-height:1.4;">
+              💡 <strong>Portabilidad:</strong> Use <em>Exportar JSON</em> para transferir el levantamiento entre su computadora y iPad sin pérdida de información (muros, cotas, bases, huecos y elevaciones).
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Datos del Proyecto Activo</h2>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Nombre del Proyecto *</label>
+              <input type="text" class="form-input" id="projNameInput" oninput="App.updateProjectMeta()" placeholder="Ej. Residencial Reforma - Mobiliario" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Cliente / Obra</label>
+              <input type="text" class="form-input" id="projClientInput" oninput="App.updateProjectMeta()" placeholder="Nombre del cliente u obra" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Ubicación / Referencia</label>
+              <input type="text" class="form-input" id="projSiteInput" oninput="App.updateProjectMeta()" placeholder="Dirección o nivel" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Altura General Predominante (mm) *</label>
+              <input type="number" class="form-input numpad-target" id="projHeightInput" oninput="App.updateProjectMeta()" step="1" min="500" max="12000" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Notas Generales AS-BUILT</label>
+              <textarea class="form-input" id="projNotesInput" rows="2" oninput="App.updateProjectMeta()" placeholder="Observaciones generales de campo"></textarea>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Proyectos Recientes Guardados</h2>
+              <button class="btn btn-sm" onclick="App.refreshRecentProjects()">🔄</button>
+            </div>
+            <div id="recentProjectsList" style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto;"></div>
+          </div>
+        </div>
+
+        <!-- Columna derecha: Gestión de Conceptos del Proyecto -->
+        <div style="display:flex; flex-direction:column; gap:16px;">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <h2 class="card-title">Conceptos del Proyecto (Ambientes y Puertas)</h2>
+                <div style="font-size:12.5px; color:var(--text-muted); margin-top:2px;">
+                  Cada concepto conserva sus muros, cotas, bases de concreto y elevaciones. Las puertas usan interfaz frontal de 9 medidas.
+                </div>
+              </div>
+            </div>
+
+            <!-- Barra rápida para agregar nuevo concepto -->
+            <div style="display:grid; grid-template-columns: 200px 1fr auto; gap:10px; background:var(--bg-subtle); padding:12px; border-radius:10px; margin-bottom:16px; align-items:end;">
+              <div>
+                <label class="form-label">Tipo de Concepto</label>
+                <select class="form-input" id="newConceptTypeSelect" onchange="App.onConceptTypeChange()">
+                  <option value="COCINA">Cocina</option>
+                  <option value="BANO">Baño</option>
+                  <option value="CLOSET">Clóset</option>
+                  <option value="VESTIDOR">Vestidor</option>
+                  <option value="SALA">Sala</option>
+                  <option value="COMEDOR">Comedor</option>
+                  <option value="PASILLO">Pasillo</option>
+                  <option value="OTRO">Otro ambiente</option>
+                  <option value="PUERTA">Puerta de intercomunicación (Frontal)</option>
+                </select>
+              </div>
+              <div>
+                <label class="form-label">Nombre / Identificador del Concepto</label>
+                <input type="text" class="form-input" id="newConceptNameInput" placeholder="Ej. Cocina Principal / Clóset Recámara 1 / Puerta P-01" />
+              </div>
+              <button class="btn btn-primary" onclick="App.addConcept()">
+                ➕ Agregar Concepto
+              </button>
+            </div>
+
+            <div class="concept-grid" id="conceptsGridContainer"></div>
+          </div>
+
+          <!-- Resumen rápido de cumplimiento Cerebro IA y Exportación -->
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Control de Calidad AS-BUILT y Exportación Directa</h2>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-primary" onclick="App.openExportModal()">
+                  📐 Exportar PDF / DXF (Rhino 8)
+                </button>
+              </div>
+            </div>
+            <div id="projectAuditSummaryBox" style="font-size:13px; line-height:1.5;"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         VISTA 2: BOCETO RÁPIDO EN PLANTA (EDITOR 2D CENITAL)
+         ==================================================================== -->
+    <section class="view-panel" id="viewPlan">
+      <div class="editor-shell">
+        <!-- Barra lateral izquierda de herramientas 2D -->
+        <aside class="left-toolbar">
+          <button class="btn btn-sm btn-subtle-back" onclick="App.navigateBack()" title="Regresar al proyecto y conceptos" style="width:100%; justify-content:center; margin-bottom:4px;">
+            ◀ Volver a Proyecto
+          </button>
+          <div class="tool-section-title">Concepto Activo</div>
+          <select class="form-input" id="planConceptSelect" onchange="App.selectConcept(this.value)"></select>
+
+          <div class="tool-section-title">Herramientas de Trazo</div>
+          <button class="tool-btn active" id="toolBtnWall" onclick="App.setPlanTool('WALL')">
+            ✏️ Muro individual (2 puntos)
+          </button>
+          <button class="tool-btn" id="toolBtnChained" onclick="App.setPlanTool('CHAINED')">
+            🔗 Muros encadenados (Multi-punto)
+          </button>
+          <button class="tool-btn" id="toolBtnFreehand" onclick="App.setPlanTool('FREEHAND')">
+            ✍️ Mano alzada (Boceto libre)
+          </button>
+          <button class="tool-btn" id="toolBtnGap" onclick="App.setPlanTool('GAP')">
+            ↔️ Separación / Hueco
+          </button>
+          <button class="tool-btn" id="toolBtnPollo" onclick="App.setPlanTool('POLLO')">
+            🧱 Base Concreto / Pollo
+          </button>
+          <button class="tool-btn" id="toolBtnSardinel" onclick="App.setPlanTool('SARDINEL')">
+            🚿 Sardinel de Piso
+          </button>
+          <button class="tool-btn" id="toolBtnSelect" onclick="App.setPlanTool('SELECT')">
+            👆 Seleccionar / Editar
+          </button>
+          <button class="tool-btn" id="toolBtnPan" onclick="App.setPlanTool('PAN')">
+            ✋ Panorámica (Mover vista)
+          </button>
+
+          <!-- Acciones de control de trazo (visibles para mouse y pantallas táctiles/tablets) -->
+          <div id="drawingActionsContainer" style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">
+            <button class="btn btn-warning" id="btnCancelDrawing" onclick="App.cancelCurrentDrawing()" title="Cancelar trazo en curso (Esc)">
+              🛑 Cancelar Trazo (Esc)
+            </button>
+            <button class="btn btn-finish-chained" id="btnFinishChained" style="display:none;" onclick="App.finishChainedDrawing()" title="Finalizar trazado encadenado (Enter)">
+              ✔ Finalizar Trazado (Enter)
+            </button>
+            <button class="btn btn-success" id="btnFinishPollo" style="display:none; background:#16a34a; color:#fff;" onclick="App.finishPolloDrawing()" title="Finalizar base de concreto poligonal (Enter)">
+              ✔ Finalizar Base (Enter)
+            </button>
+          </div>
+
+          <div class="tool-section-title">Restricción Angular</div>
+          <button class="tool-btn" id="btnToggleOrtho" onclick="App.toggleOrthoMode()">
+            📐 Ortogonal: ACTIVO (0°/90°)
+          </button>
+          <div id="manualAngleBox" style="display:none; background:var(--bg-subtle); padding:8px; border-radius:8px;">
+            <label class="form-label">Definir Ángulo Manual (°)</label>
+            <input type="number" class="form-input numpad-target" id="manualAngleInput" value="135" step="0.5" />
+          </div>
+
+          <div class="tool-section-title">Topología y Orden</div>
+          <button class="tool-btn" onclick="App.openRenumberPreviewModal()">
+            🔢 Renumerar Izq→Der
+          </button>
+          <button class="tool-btn" id="btnToggleClosedLoop" onclick="App.toggleClosedLoop()">
+            🔗 Planta: ABIERTA
+          </button>
+          <button class="tool-btn" id="btnClearPlanBtn" onclick="App.clearCurrentRoomPlan()" style="border-color:#fca5a5; color:#b91c1c;">
+            🧹 Limpiar Planta
+          </button>
+
+          <div class="tool-section-title">Historial</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+            <button class="btn" onclick="App.undo()">↩️ Deshacer</button>
+            <button class="btn" onclick="App.redo()">↪️ Rehacer</button>
+          </div>
+          <button class="btn btn-danger" onclick="App.deleteSelectedEntity()">
+            🗑️ Borrar Seleccionado
+          </button>
+        </aside>
+
+        <!-- Lienzo central 2D protagonista -->
+        <div class="canvas-stage-wrapper" id="planStageWrapper">
+          <div class="canvas-hud-top">
+            <div class="hud-group" style="flex:1;">
+              <span style="font-weight:800; font-size:13px;" id="planToolHint">
+                Toque punto inicial y luego el extremo para trazar muro. Longitud provisional en m; cota real en mm fija el muro.
+              </span>
+            </div>
+            <div class="hud-group">
+              <button class="btn btn-warning btn-sm" id="hudBtnCancelDrawing" onclick="App.cancelCurrentDrawing()" title="Cancelar trazo en curso">
+                🛑 Cancelar Trazo
+              </button>
+              <button class="btn btn-finish-chained btn-sm" id="hudBtnFinishChained" style="display:none;" onclick="App.finishChainedDrawing()" title="Finalizar trazado encadenado">
+                ✔ Finalizar Trazado
+              </button>
+              <button class="btn btn-success btn-sm" id="hudBtnFinishPollo" style="display:none; background:#16a34a; color:#fff;" onclick="App.finishPolloDrawing()" title="Finalizar base de concreto poligonal">
+                ✔ Finalizar Base
+              </button>
+              <button class="btn btn-sm" onclick="App.zoomPlan(1.2)">➕ Zoom</button>
+              <button class="btn btn-sm" onclick="App.zoomPlan(0.8)">➖ Zoom</button>
+              <button class="btn btn-sm" onclick="App.fitPlanToScreen()">🔍 Encuadrar</button>
+            </div>
+          </div>
+
+          <canvas id="planCanvas" class="drawing-canvas"></canvas>
+          <!-- Capa de campos rectangulares por muro para introducir longitud real en mm + botón + Elevación -->
+          <div id="wallOverlaysLayer" class="wall-overlays-layer"></div>
+        </div>
+
+        <!-- Panel derecho: Inspector de Muro, Fijación Progresiva y Base de Concreto / Pollo -->
+        <aside class="right-inspector" id="planRightInspector">
+          <div id="planInspectorContent"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         VISTA 3: ELEVACIÓN FRONTAL DE CADA MURO (INSTALACIONES Y 4 REFERENCIAS)
+         ==================================================================== -->
+    <section class="view-panel" id="viewElevation">
+      <div class="editor-shell">
+        <!-- Paleta gráfica para arrastrar o insertar mediante toque -->
+        <aside class="left-toolbar">
+          <div class="tool-section-title">Navegación de Muros</div>
+          <div style="display:flex; gap:6px; margin-bottom:4px;">
+            <button class="btn btn-sm" style="flex:1;" onclick="App.stepElevationWall(-1)">◀ Ant.</button>
+            <button class="btn btn-sm" style="flex:1;" onclick="App.stepElevationWall(1)">Sig. ▶</button>
+          </div>
+          <select class="form-input" id="elevWallSelect" onchange="App.selectElevationWall(this.value)"></select>
+          <button class="btn btn-sm btn-subtle-back" onclick="App.navigateBack()" title="Regresar al boceto en planta" style="width:100%; justify-content:center; margin-top:4px;">
+            ◀ Volver a Planta
+          </button>
+
+          <div class="tool-section-title">Paleta: Contactos Eléctricos</div>
+          <div style="font-size:11px; color:var(--text-muted); margin-bottom:4px;">
+            Arrastre al muro o toque para insertar:
+          </div>
+          <button class="tool-btn" draggable="true" ondragstart="App.onPaletteDragStart(event, 'ELECTRICAL', 'CONTACTO_DUPLEX')" onclick="App.insertElevationElement('ELECTRICAL', 'CONTACTO_DUPLEX')">
+            🔌 Contacto Dúplex 127V
+          </button>
+          <button class="tool-btn" draggable="true" ondragstart="App.onPaletteDragStart(event, 'ELECTRICAL', 'CONTACTO_GFCI')" onclick="App.insertElevationElement('ELECTRICAL', 'CONTACTO_GFCI')">
+            🛡️ Contacto GFCI / ICFT
+          </button>
+          <button class="tool-btn" draggable="true" ondragstart="App.onPaletteDragStart(event, 'ELECTRICAL', 'CONTACTO_MODUS')" onclick="App.insertElevationElement('ELECTRICAL', 'CONTACTO_MODUS')">
+            🔌 Contacto Modular 85×120
+          </button>
+          <button class="tool-btn" draggable="true" ondragstart="App.onPaletteDragStart(event, 'ELECTRICAL', 'TOMA_220V')" onclick="App.insertElevationElement('ELECTRICAL', 'TOMA_220V')">
+            ⚡ Toma 220V (Caja 4×4")
+          </button>
+          <button class="tool-btn" draggable="true" ondragstart="App.onPaletteDragStart(event, 'ELECTRICAL', 'APAGADOR')" onclick="App.insertElevationElement('ELECTRICAL', 'APAGADOR')">
+            💡 Apagador / Interruptor
+          </button>
+
+          <div class="tool-section-title">Paleta: Salidas Hidrosanitarias</div>
+          <button class="tool-btn" draggable="true" ondragstart="App.onPaletteDragStart(event, 'PLUMBING', 'CONJUNTO_TARJA_CONAVI')" onclick="App.insertElevationElement('PLUMBING', 'CONJUNTO_TARJA_CONAVI')">
+            🚰 Conjunto Tarja (AC+AF+Dren)
+          </button>
+          <button class="tool-btn" draggable="true" ondragstart="App.onPaletteDragStart(event, 'PLUMBING', 'CONJUNTO_LAVABO_CONAVI')" onclick="App.insertElevationElement('PLUMBING', 'CONJUNTO_LAVABO_CONAVI')">
+            🚰 Conjunto Lavabo (AC+AF+Dren)
+          </button>
+          <button class="tool-btn" draggable="true" ondragstart="App.onPaletteDragStart(event, 'PLUMBING', 'SALIDA_AGUA_FRIA')" onclick="App.insertElevationElement('PLUMBING', 'SALIDA_AGUA_FRIA')">
+            🔵 Agua Fría Aislada (AF)
+          </button>
+          <button class="tool-btn" draggable="true" ondragstart="App.onPaletteDragStart(event, 'PLUMBING', 'SALIDA_AGUA_CALIENTE')" onclick="App.insertElevationElement('PLUMBING', 'SALIDA_AGUA_CALIENTE')">
+            🔴 Agua Caliente Aislada (AC)
+          </button>
+          <button class="tool-btn" draggable="true" ondragstart="App.onPaletteDragStart(event, 'PLUMBING', 'SALIDA_DRENAJE')" onclick="App.insertElevationElement('PLUMBING', 'SALIDA_DRENAJE')">
+            ⚫ Drenaje Sanitario (Ø50)
+          </button>
+
+          <div class="tool-section-title">Paleta: Ventanas y Vanos</div>
+          <button class="tool-btn" draggable="true" ondragstart="App.onPaletteDragStart(event, 'WINDOW', 'VENTANA_ESTANDAR')" onclick="App.insertElevationElement('WINDOW', 'VENTANA_ESTANDAR')">
+            🪟 Ventana Acotada
+          </button>
+          <button class="tool-btn" draggable="true" ondragstart="App.onPaletteDragStart(event, 'OPENING', 'VANO_PASO')" onclick="App.insertElevationElement('OPENING', 'VANO_PASO')">
+            🚪 Vano Abierto en Muro
+          </button>
+        </aside>
+
+        <!-- Lienzo frontal de Elevación del Muro -->
+        <div class="canvas-stage-wrapper" id="elevStageWrapper" ondragover="event.preventDefault()" ondrop="App.onElevationCanvasDrop(event)">
+          <div class="canvas-hud-top">
+            <div class="hud-group">
+              <strong id="elevHeaderTitle">Elevación Frontal: Muro 1 (M01)</strong>
+              <span style="margin-left:8px; font-size:13px;">Ancho (mm): <strong id="elevWallWidthLabel">3000</strong></span>
+              <span style="margin-left:8px; font-size:13px;">Altura real (mm):</span>
+              <input type="number" class="form-input numpad-target" id="elevWallHeightInput" style="width:105px; min-height:36px; padding:4px 8px;" onchange="App.updateElevationWallHeight(this.value)" />
+            </div>
+            <div class="hud-group">
+              <button class="btn btn-sm" onclick="App.fitElevationToScreen()">🔍 Encuadrar Muro</button>
+            </div>
+          </div>
+
+          <canvas id="elevationCanvas" class="drawing-canvas"></canvas>
+        </div>
+
+        <!-- Inspector derecho de Elevación: 4 referencias al centro y parámetros editables -->
+        <aside class="right-inspector">
+          <div id="elevInspectorContent"></div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ====================================================================
+         VISTA 4: INTERFAZ ESPECIAL PUERTAS DE INTERCOMUNICACIÓN (9 MEDIDAS)
+         ==================================================================== -->
+    <section class="view-panel" id="viewDoor">
+      <div class="door-survey-layout">
+        <!-- Esquema frontal interactivo del vano -->
+        <div class="card" style="display:flex; flex-direction:column; min-height:540px;">
+          <div class="card-header">
+            <div>
+              <h2 class="card-title">Vista Frontal del Vano — Puerta de Intercomunicación</h2>
+              <div style="font-size:12.5px; color:var(--text-muted);">
+                Geometría de referencia calculada con los mínimos de ancho, alto y espesor. Preserva las 9 lecturas originales en mm.
+              </div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+              <select class="form-input" id="doorConceptSelect" style="width:220px;" onchange="App.selectDoorConcept(this.value)"></select>
+              <button class="btn btn-sm btn-subtle-back" onclick="App.navigateBack()" title="Regresar al proyecto y conceptos">
+                ◀ Volver a Proyecto
+              </button>
+            </div>
+          </div>
+          <div style="flex:1; position:relative; min-height:440px;">
+            <canvas id="doorCanvas" class="drawing-canvas" style="border:1.5px solid var(--border-color); border-radius:8px;"></canvas>
+          </div>
+        </div>
+
+        <!-- Captura de las 9 medidas en mm y cálculo de mínimos -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Captura de 9 Medidas del Vano (mm)</h2>
+          </div>
+
+          <div style="background:#fff7ed; border:1.5px solid #fdba74; padding:10px; border-radius:8px; font-size:12px; color:#9a3412; font-weight:700; margin-bottom:12px;">
+            ⚠️ REGLA AS-BUILT: Se guardan las 9 lecturas originales en mm y se exportan los 3 mínimos por separado. NO se descuentan holguras ni se dan medidas definitivas de fabricación.
+          </div>
+
+          <table class="nine-grid-table">
+            <thead>
+              <tr>
+                <th>Grupo</th>
+                <th>Posición 1 (mm)</th>
+                <th>Posición 2 (mm)</th>
+                <th>Posición 3 (mm)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Ancho del vano</strong></td>
+                <td>
+                  <div style="font-size:11px; color:var(--text-muted);">Inferior</div>
+                  <input type="number" class="form-input numpad-target" id="doorWInf" oninput="App.onDoorInputChanged()" />
+                </td>
+                <td>
+                  <div style="font-size:11px; color:var(--text-muted);">Medio</div>
+                  <input type="number" class="form-input numpad-target" id="doorWMed" oninput="App.onDoorInputChanged()" />
+                </td>
+                <td>
+                  <div style="font-size:11px; color:var(--text-muted);">Superior</div>
+                  <input type="number" class="form-input numpad-target" id="doorWSup" oninput="App.onDoorInputChanged()" />
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Alto del vano</strong></td>
+                <td>
+                  <div style="font-size:11px; color:var(--text-muted);">Izquierdo</div>
+                  <input type="number" class="form-input numpad-target" id="doorHIzq" oninput="App.onDoorInputChanged()" />
+                </td>
+                <td>
+                  <div style="font-size:11px; color:var(--text-muted);">Centro</div>
+                  <input type="number" class="form-input numpad-target" id="doorHCen" oninput="App.onDoorInputChanged()" />
+                </td>
+                <td>
+                  <div style="font-size:11px; color:var(--text-muted);">Derecho</div>
+                  <input type="number" class="form-input numpad-target" id="doorHDer" oninput="App.onDoorInputChanged()" />
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Espesor del muro</strong></td>
+                <td>
+                  <div style="font-size:11px; color:var(--text-muted);">Superior</div>
+                  <input type="number" class="form-input numpad-target" id="doorTSup" oninput="App.onDoorInputChanged()" />
+                </td>
+                <td>
+                  <div style="font-size:11px; color:var(--text-muted);">Medio</div>
+                  <input type="number" class="form-input numpad-target" id="doorTMed" oninput="App.onDoorInputChanged()" />
+                </td>
+                <td>
+                  <div style="font-size:11px; color:var(--text-muted);">Inferior</div>
+                  <input type="number" class="form-input numpad-target" id="doorTInf" oninput="App.onDoorInputChanged()" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px;">
+            <div>
+              <label class="form-label">Altura Techo Local Referencia (mm)</label>
+              <input type="number" class="form-input numpad-target" id="doorCeilingH" oninput="App.onDoorInputChanged()" />
+            </div>
+            <div>
+              <label class="form-label">Desnivel Base / Umbral (mm)</label>
+              <input type="number" class="form-input numpad-target" id="doorBaseOffset" value="0" oninput="App.onDoorInputChanged()" />
+            </div>
+          </div>
+
+          <h3 style="font-size:13.5px; margin:14px 0 6px;">Geometría Mínima de Referencia Exportada</h3>
+          <div class="min-result-box">
+            <div class="min-stat-card">
+              <div style="font-size:11px; font-weight:700;">ANCHO MÍNIMO</div>
+              <div class="min-stat-value" id="doorMinWLabel">- mm</div>
+              <div style="font-size:11px; color:var(--text-muted);" id="doorSpreadWLabel">Δ = 0 mm</div>
+            </div>
+            <div class="min-stat-card">
+              <div style="font-size:11px; font-weight:700;">ALTO MÍNIMO</div>
+              <div class="min-stat-value" id="doorMinHLabel">- mm</div>
+              <div style="font-size:11px; color:var(--text-muted);" id="doorSpreadHLabel">Δ = 0 mm</div>
+            </div>
+            <div class="min-stat-card">
+              <div style="font-size:11px; font-weight:700;">ESPESOR MÍNIMO</div>
+              <div class="min-stat-value" id="doorMinTLabel">- mm</div>
+              <div style="font-size:11px; color:var(--text-muted);" id="doorSpreadTLabel">Δ = 0 mm</div>
+            </div>
+          </div>
+
+          <div id="doorWarningsBox" style="margin-top:12px; font-size:12.5px;"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- TECLADO NUMÉRICO TÁCTIL FLOTANTE CAD -->
+  <div class="floating-numpad" id="floatingNumpad">
+    <div class="numpad-header">
+      <strong style="font-size:13px;" id="numpadTargetLabel">Teclado Numérico (mm)</strong>
+      <button class="btn btn-sm" style="min-height:32px; padding:2px 8px;" onclick="App.closeTouchNumpad()">✖</button>
+    </div>
+    <input type="text" class="numpad-display" id="numpadDisplayInput" readonly />
+    <div class="numpad-grid">
+      <button class="numpad-key" onclick="App.numpadPress('7')">7</button>
+      <button class="numpad-key" onclick="App.numpadPress('8')">8</button>
+      <button class="numpad-key" onclick="App.numpadPress('9')">9</button>
+      <button class="numpad-key" onclick="App.numpadPress('4')">4</button>
+      <button class="numpad-key" onclick="App.numpadPress('5')">5</button>
+      <button class="numpad-key" onclick="App.numpadPress('6')">6</button>
+      <button class="numpad-key" onclick="App.numpadPress('1')">1</button>
+      <button class="numpad-key" onclick="App.numpadPress('2')">2</button>
+      <button class="numpad-key" onclick="App.numpadPress('3')">3</button>
+      <button class="numpad-key" onclick="App.numpadPress('0')">0</button>
+      <button class="numpad-key" onclick="App.numpadPress('.')">.</button>
+      <button class="numpad-key" onclick="App.numpadPress('BACK')">⌫</button>
+      <button class="numpad-key key-confirm" onclick="App.numpadConfirm()">✔ Confirmar Medida (mm)</button>
+    </div>
+  </div>
+
+  <!-- MODAL: VISTA PREVIA DE RENUMERACIÓN IZQUIERDA -> DERECHA -->
+  <div class="modal-backdrop" id="renumberModal">
+    <div class="modal-card">
+      <div class="card-header">
+        <h2 class="card-title">Vista Previa de Enumeración Izquierda → Derecha</h2>
+        <button class="btn btn-sm" onclick="App.closeRenumberModal()">✖</button>
+      </div>
+      <p style="font-size:13.5px; color:var(--text-muted); margin-top:0;">
+        La regla de enumeración asigna «Muro 1», «Muro 2»… en orden espacial izquierda→derecha comenzando por el extremo más a la izquierda, conservando intactas todas las elevaciones, instalaciones y referencias.
+      </p>
+      <div id="renumberPreviewBody"></div>
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">
+        <button class="btn" onclick="App.closeRenumberModal()">Cancelar (Sin cambios)</button>
+        <button class="btn btn-primary" onclick="App.confirmRenumberLeftToRight()">
+          ✔ Aplicar Enumeración Izquierda → Derecha
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: AUDITORÍA PRE-VUELO Y EXPORTACIÓN PDF / DXF (RHINO 8) -->
+  <div class="modal-backdrop" id="exportModal">
+    <div class="modal-card">
+      <div class="card-header">
+        <h2 class="card-title">Auditoría AS-BUILT y Exportación (PDF / DXF Rhino 8)</h2>
+        <button class="btn btn-sm" onclick="App.closeExportModal()">✖</button>
+      </div>
+      <div id="exportAuditModalBody" style="font-size:13.5px;"></div>
+      <div style="display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; margin-top:18px;">
+        <button class="btn" onclick="App.closeExportModal()">Cerrar</button>
+        <button class="btn btn-success" onclick="App.downloadBackupJson()" title="Descargar archivo transferible .asbuilt.json">
+          📤 Exportar Archivo JSON Transferible (.asbuilt.json)
+        </button>
+        <button class="btn btn-primary" onclick="App.triggerExportPdf()">
+          📄 Exportar PDF Vectorial
+        </button>
+        <button class="btn btn-primary" onclick="App.triggerExportDxf()">
+          📐 Exportar DXF 2D (Rhino 8 en mm)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./js/geometry.js?v=2.4.0"></script>
+  <script src="./js/dxf_template_data.js?v=2.4.0"></script>
+  <script src="./js/exporter_dxf.js?v=2.4.0"></script>
+  <script src="./js/exporter_pdf.js?v=2.4.0"></script>
+  <script src="./js/app.js?v=2.4.0"></script>
+  <script src="./js/test_suite_boceto.js?v=2.4.0"></script>
+</body>
+</html>
